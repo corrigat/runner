@@ -16,8 +16,12 @@ RUN apt update -y && apt install -y curl unzip
 
 WORKDIR /actions-runner
 
-# Install the locally-built runner tarball (staged by the build script)
-COPY runner.tar.gz /tmp/runner.tar.gz
+# Install the locally-built runner tarball.
+# TARBALL_NAME is passed by the build script as the basename of the package
+# file (e.g. actions-runner-linux-x64-2.335.0.tar.gz). The build context is
+# _package/, so the file is available at that name relative to the context.
+ARG TARBALL_NAME
+COPY ${TARBALL_NAME} /tmp/runner.tar.gz
 RUN tar xzf /tmp/runner.tar.gz && rm /tmp/runner.tar.gz
 
 # Container hooks

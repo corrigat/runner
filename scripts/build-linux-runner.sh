@@ -115,19 +115,16 @@ else
     esac
 
     IMAGE_TAG="actions-runner:${RUNNER_VERSION}-${RUNTIME_ID}"
-    CONTEXT_TARBALL="$REPO_ROOT/images/runner.tar.gz"
-
-    # Stage the tarball in the Docker build context; always clean it up on exit.
-    cp "$TARBALL" "$CONTEXT_TARBALL"
-    trap 'rm -f "$CONTEXT_TARBALL"' EXIT
+    TARBALL_NAME="$(basename "$TARBALL")"
 
     echo "--- Docker image ($DOCKER_PLATFORM → $IMAGE_TAG) ---"
     docker buildx build \
         --platform "$DOCKER_PLATFORM" \
         --load \
         --tag "$IMAGE_TAG" \
+        --build-arg "TARBALL_NAME=${TARBALL_NAME}" \
         --file "$REPO_ROOT/images/Dockerfile.local" \
-        "$REPO_ROOT/images/"
+        "$PACKAGE_DIR"
 fi
 
 # ---------------------------------------------------------------------------
