@@ -39,6 +39,9 @@ namespace GitHub.Runner.Common
         public bool Ephemeral { get; set; }
 
         [DataMember(EmitDefaultValue = false)]
+        public int IdleTimeoutMinutes { get; set; }
+
+        [DataMember(EmitDefaultValue = false)]
         public string ServerUrl { get; set; }
 
         [DataMember(EmitDefaultValue = false)]

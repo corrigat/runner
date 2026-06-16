@@ -469,6 +469,17 @@ namespace GitHub.Runner.Listener.Configuration
 
             runnerSettings.MonitorSocketAddress = command.GetMonitorSocketAddress();
 
+            string idleTimeoutStr = command.GetIdleTimeout();
+            if (!string.IsNullOrEmpty(idleTimeoutStr))
+            {
+                if (!int.TryParse(idleTimeoutStr, out int idleTimeoutMinutes) || idleTimeoutMinutes < 1)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        $"Invalid --idletimeout value '{idleTimeoutStr}'. Must be an integer >= 1 (minutes).");
+                }
+                runnerSettings.IdleTimeoutMinutes = idleTimeoutMinutes;
+            }
+
             _store.SaveSettings(runnerSettings);
 
             _term.WriteLine();

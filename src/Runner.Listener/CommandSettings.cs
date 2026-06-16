@@ -40,6 +40,7 @@ namespace GitHub.Runner.Listener
                     Constants.Runner.CommandLine.Flags.Unattended,
                     Constants.Runner.CommandLine.Flags.NoDefaultLabels,
                     Constants.Runner.CommandLine.Args.Auth,
+                    Constants.Runner.CommandLine.Args.IdleTimeout,
                     Constants.Runner.CommandLine.Args.Labels,
                     Constants.Runner.CommandLine.Args.MonitorSocketAddress,
                     Constants.Runner.CommandLine.Args.Name,
@@ -328,6 +329,11 @@ namespace GitHub.Runner.Listener
                 description: "Enter name of work folder:",
                 defaultValue: Constants.Path.WorkDirectory,
                 validator: Validators.NonEmptyValidator);
+        }
+
+        public string GetIdleTimeout()
+        {
+            return GetArg(Constants.Runner.CommandLine.Args.IdleTimeout);
         }
 
         public string GetMonitorSocketAddress()

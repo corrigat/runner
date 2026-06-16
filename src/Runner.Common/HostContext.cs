@@ -839,5 +839,6 @@ namespace GitHub.Runner.Common
     {
         UserCancelled = 0,
         OperatingSystemShutdown = 1,
+        IdleTimeout = 2,
     }
 }

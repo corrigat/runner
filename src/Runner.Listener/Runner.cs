@@ -57,6 +57,9 @@ namespace GitHub.Runner.Listener
         // The error throttler helps us back off when encountering successive, non-retriable errors from /acquirejob.
         // </summary>
         private IErrorThrottler _acquireJobThrottler;
+        private volatile bool _idleCheckInProgress;
+        private DateTime _lastJobActivityTime;
+        private CancellationTokenSource _idleTimeoutTokenSource;
 
         public override void Initialize(IHostContext hostContext)
         {
@@ -498,6 +501,7 @@ namespace GitHub.Runner.Listener
                 bool skipSessionDeletion = false;
                 bool restartSession = false; // Flag to indicate session restart
                 bool restartSessionPending = false;
+                Task idleTimeoutTask = null;
                 try
                 {
                     var notification = HostContext.GetService<IJobNotification>();
@@ -510,6 +514,15 @@ namespace GitHub.Runner.Listener
                     jobDispatcher = HostContext.CreateService<IJobDispatcher>();
 
                     jobDispatcher.JobStatus += _listener.OnJobStatus;
+                    jobDispatcher.JobStatus += OnJobStatusForIdleTimeout;
+
+                    _lastJobActivityTime = DateTime.UtcNow;
+                    if (settings.IdleTimeoutMinutes > 0)
+                    {
+                        _idleTimeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(HostContext.RunnerShutdownToken);
+                        Trace.Info($"Idle timeout configured: {settings.IdleTimeoutMinutes} minutes.");
+                        idleTimeoutTask = CheckIdleTimeoutAsync(settings.IdleTimeoutMinutes, _idleTimeoutTokenSource.Token);
+                    }
 
                     while (!HostContext.RunnerShutdownToken.IsCancellationRequested)
                     {
@@ -668,11 +681,19 @@ namespace GitHub.Runner.Listener
                                 {
                                     Trace.Info($"Received job message of length {message.Body.Length} from service, with hash '{IOUtil.GetSha256Hash(message.Body)}'");
                                     var jobMessage = StringUtil.ConvertFromJson<Pipelines.AgentJobRequestMessage>(message.Body);
-                                    jobDispatcher.Run(jobMessage, runOnce);
-                                    if (runOnce)
+                                    if (HostContext.RunnerShutdownToken.IsCancellationRequested || _idleCheckInProgress)
                                     {
-                                        Trace.Info("One time used runner received job message.");
-                                        runOnceJobReceived = true;
+                                        skipMessageDeletion = true;
+                                        Trace.Info("Skipping job dispatch: shutdown or idle check in progress. Message remains in queue.");
+                                    }
+                                    else
+                                    {
+                                        jobDispatcher.Run(jobMessage, runOnce);
+                                        if (runOnce)
+                                        {
+                                            Trace.Info("One time used runner received job message.");
+                                            runOnceJobReceived = true;
+                                        }
                                     }
                                 }
                             }
@@ -752,13 +773,21 @@ namespace GitHub.Runner.Listener
                                     }
 
                                     // Dispatch
-                                    jobDispatcher.Run(jobRequestMessage, runOnce);
-
-                                    // Run once?
-                                    if (runOnce)
+                                    if (HostContext.RunnerShutdownToken.IsCancellationRequested || _idleCheckInProgress)
                                     {
-                                        Trace.Info("One time used runner received job message.");
-                                        runOnceJobReceived = true;
+                                        skipMessageDeletion = true;
+                                        Trace.Info("Skipping job dispatch: shutdown or idle check in progress. Message remains in queue.");
+                                    }
+                                    else
+                                    {
+                                        jobDispatcher.Run(jobRequestMessage, runOnce);
+
+                                        // Run once?
+                                        if (runOnce)
+                                        {
+                                            Trace.Info("One time used runner received job message.");
+                                            runOnceJobReceived = true;
+                                        }
                                     }
                                 }
                             }
@@ -839,7 +868,17 @@ namespace GitHub.Runner.Listener
                     if (jobDispatcher != null)
                     {
                         jobDispatcher.JobStatus -= _listener.OnJobStatus;
+                        jobDispatcher.JobStatus -= OnJobStatusForIdleTimeout;
                         await jobDispatcher.ShutdownAsync();
+                    }
+
+                    _idleTimeoutTokenSource?.Cancel();
+                    _idleTimeoutTokenSource?.Dispose();
+                    _idleTimeoutTokenSource = null;
+                    if (idleTimeoutTask != null)
+                    {
+                        try { await idleTimeoutTask; }
+                        catch (OperationCanceledException) { }
                     }
 
                     if (!skipSessionDeletion)
@@ -1096,6 +1135,63 @@ namespace GitHub.Runner.Listener
                     }
                 }
             }
+        }
+
+        private void OnJobStatusForIdleTimeout(object sender, JobStatusEventArgs e)
+        {
+            if (e.Status == TaskAgentStatus.Online)
+            {
+                _lastJobActivityTime = DateTime.UtcNow;
+            }
+        }
+
+        private async Task CheckIdleTimeoutAsync(int idleTimeoutMinutes, CancellationToken token)
+        {
+            Trace.Info($"Idle timeout check started. Timeout: {idleTimeoutMinutes} min, check interval: 10 min.");
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await HostContext.Delay(TimeSpan.FromMinutes(10), token);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        break;
+                    }
+
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    _idleCheckInProgress = true;
+                    try
+                    {
+                        var idleDuration = DateTime.UtcNow - _lastJobActivityTime;
+                        Trace.Info($"Idle check: {idleDuration.TotalMinutes:F1} min idle. Threshold: {idleTimeoutMinutes} min.");
+
+                        if (idleDuration >= TimeSpan.FromMinutes(idleTimeoutMinutes))
+                        {
+                            Trace.Info($"Idle timeout reached ({idleTimeoutMinutes} minutes without a completed job). Shutting down runner.");
+                            HostContext.ShutdownRunner(ShutdownReason.IdleTimeout);
+                            return;
+                        }
+                    }
+                    finally
+                    {
+                        _idleCheckInProgress = false;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.Error("Unexpected error in idle timeout background task:");
+                Trace.Error(ex);
+            }
+
+            Trace.Info("Idle timeout background task exiting.");
         }
 
         private void PrintUsage(CommandSettings command)
