@@ -114,7 +114,7 @@ else
         linux-arm)   DOCKER_PLATFORM="linux/arm/v7" ;;
     esac
 
-    IMAGE_TAG="actions-runner:${RUNNER_VERSION}-${RUNTIME_ID}"
+    IMAGE_TAG="artifactory.ci.corp.tanium.com:10005/eng/go/actions-runner:${RUNNER_VERSION}"
     TARBALL_NAME="$(basename "$TARBALL")"
 
     echo "--- Docker image ($DOCKER_PLATFORM → $IMAGE_TAG) ---"
